@@ -1,0 +1,60 @@
+services:
+  assets-init:
+    build:
+      context: ./infra/assets
+      dockerfile: Dockerfile
+    container_name: katago-assets-init
+    restart: "no"
+    environment:
+      - FORCE_UPDATE=0
+    volumes:
+      - katago_data:/out/katago
+      - model_data:/out/models
+
+  gateway:
+    build:
+      context: ./infra
+      dockerfile: nginx.Dockerfile
+    container_name: katago-gateway
+    ports:
+      - "80:80"
+    depends_on:
+      frontend:
+        condition: service_started
+      backend:
+        condition: service_started
+
+  backend:
+    build:
+      context: ./backend
+    container_name: katago-backend
+    expose:
+      - "8000"
+    environment:
+      - KATAGO_BINARY=/opt/katago/katago
+      - KATAGO_CONFIG=/configs/analysis_example.cfg
+      - KATAGO_MODEL=/models/model.bin.gz
+      - APPIMAGE_EXTRACT_AND_RUN=1
+    volumes:
+      - katago_data:/opt/katago:ro
+      - model_data:/models:ro
+      - ./configs:/configs:ro
+    depends_on:
+      assets-init:
+        condition: service_completed_successfully
+
+  frontend:
+    build:
+      context: ./frontend
+    container_name: katago-frontend
+    expose:
+      - "80"
+    environment:
+      - PORT=80
+    depends_on:
+      backend:
+        condition: service_started
+
+volumes:
+  katago_data:
+  model_data:
