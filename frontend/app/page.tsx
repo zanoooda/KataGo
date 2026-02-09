@@ -20,7 +20,6 @@ const EMPTY_STATE: GameStatePayload = {
 export default function Page() {
   const wsRef = useRef<WebSocket | null>(null);
   const logsRef = useRef<HTMLPreElement | null>(null);
-  const rightRef = useRef<HTMLElement | null>(null);
   const [wsReady, setWsReady] = useState(false);
 
   const [state, setState] = useState<GameStatePayload>(EMPTY_STATE);
@@ -38,6 +37,7 @@ export default function Page() {
   const [komi, setKomi] = useState(6.5);
   const [handicap, setHandicap] = useState(0);
   const [maxVisits, setMaxVisits] = useState(1200);
+  const [stonesOnly, setStonesOnly] = useState(false);
 
   useEffect(() => {
     const ws = connect((event: ServerEvent) => {
@@ -91,6 +91,26 @@ export default function Page() {
   const currentFrame = useMemo(() => (framesByMove[state.moves.length] ?? []).slice(-1)[0] ?? null, [framesByMove, state.moves.length]);
   const hoveredMove = selectedFrame?.moveInfos?.[hoveredRank] ?? null;
   const hoveredPv = hoveredMove ? [hoveredMove.move, ...(hoveredMove.pv ?? [])] : [];
+  const isAnalysisRunning = Boolean(
+    liveFrame?.isDuringSearch ||
+      currentFrame?.isDuringSearch ||
+      (selectedMove === analysisTargetMove && selectedFrame?.isDuringSearch)
+  );
+  const hasSelectedAnalysis = Boolean(
+    selectedFrame && selectedFrame.moveNumber === selectedMove && (selectedFrame.moveInfos?.length ?? 0) > 0
+  );
+  const canMutateGame = wsReady && !isAnalysisRunning;
+  const canRunAnalysis = wsReady && !isAnalysisRunning;
+  const canSelectPosition = wsReady && !isAnalysisRunning;
+  const canPlayKataGoMove = wsReady && !isAnalysisRunning && hasSelectedAnalysis;
+  const canPlayOnBoard = wsReady && !isAnalysisRunning;
+  const blockedByAnalysisHint = 'Disabled while analysis is running. Wait for completion or click Stop Analysis.';
+  const missingAnalysisHint = 'Run analysis first for the selected position, then play KataGo move.';
+  const analysisStateMessage = isAnalysisRunning
+    ? `Analyzing position ${analysisTargetMove}...`
+    : hasSelectedAnalysis
+      ? `Analysis is ready for position ${selectedMove}. Hover candidates and play a move.`
+      : `No analysis for position ${selectedMove} yet. Click Analyze Selected.`;
 
   useEffect(() => {
     setHoveredRank(0);
@@ -101,12 +121,6 @@ export default function Page() {
       logsRef.current.scrollTop = logsRef.current.scrollHeight;
     }
   }, [logs]);
-
-  useEffect(() => {
-    if (rightRef.current) {
-      rightRef.current.scrollTop = rightRef.current.scrollHeight;
-    }
-  }, [selectedFrame?.timestamp, logs.length, state.moves.length, selectedMove]);
 
   const createGame = () => {
     setLastError(null);
@@ -125,6 +139,7 @@ export default function Page() {
   };
 
   const playMove = (x: number, y: number) => {
+    if (!canPlayOnBoard) return;
     send(wsRef.current, { type: 'play_move', x, y, player: state.currentPlayer });
   };
 
@@ -139,6 +154,7 @@ export default function Page() {
   };
 
   const requestHistory = (moveNumber: number) => {
+    if (!canSelectPosition) return;
     setSelectedMove(moveNumber);
     send(wsRef.current, { type: 'get_analysis_history', moveNumber });
   };
@@ -149,7 +165,12 @@ export default function Page() {
         <div className="controls">
           <div className="group">
             <label title="Board dimensions for a new game.">Board size</label>
-            <select title="Board dimensions for a new game." value={boardSize} onChange={(e) => setBoardSize(Number(e.target.value))}>
+            <select
+              title={canMutateGame ? 'Board dimensions for a new game.' : blockedByAnalysisHint}
+              value={boardSize}
+              onChange={(e) => setBoardSize(Number(e.target.value))}
+              disabled={!canMutateGame}
+            >
               <option value={19}>19x19</option>
               <option value={13}>13x13</option>
               <option value={9}>9x9</option>
@@ -157,7 +178,12 @@ export default function Page() {
           </div>
           <div className="group">
             <label title="Scoring/ruleset sent to KataGo.">Rules</label>
-            <select title="Scoring/ruleset sent to KataGo." value={rules} onChange={(e) => setRules(e.target.value)}>
+            <select
+              title={canMutateGame ? 'Scoring/ruleset sent to KataGo.' : blockedByAnalysisHint}
+              value={rules}
+              onChange={(e) => setRules(e.target.value)}
+              disabled={!canMutateGame}
+            >
               <option value="japanese">Japanese</option>
               <option value="chinese">Chinese</option>
               <option value="korean">Korean</option>
@@ -166,83 +192,193 @@ export default function Page() {
           </div>
           <div className="group">
             <label title="Komi for new game setup.">Komi</label>
-            <input title="Komi for new game setup." type="number" step="0.5" value={komi} onChange={(e) => setKomi(Number(e.target.value))} />
+            <input
+              title={canMutateGame ? 'Komi for new game setup.' : blockedByAnalysisHint}
+              type="number"
+              step="0.5"
+              value={komi}
+              onChange={(e) => setKomi(Number(e.target.value))}
+              disabled={!canMutateGame}
+            />
           </div>
           <div className="group">
             <label title="Number of handicap stones (for new game).">Handicap</label>
-            <input title="Number of handicap stones (for new game)." type="number" min={0} max={9} value={handicap} onChange={(e) => setHandicap(Number(e.target.value))} />
+            <input
+              title={canMutateGame ? 'Number of handicap stones (for new game).' : blockedByAnalysisHint}
+              type="number"
+              min={0}
+              max={9}
+              value={handicap}
+              onChange={(e) => setHandicap(Number(e.target.value))}
+              disabled={!canMutateGame}
+            />
           </div>
         </div>
 
-        <GoBoard state={state} frame={selectedFrame ?? liveFrame} hoveredPv={hoveredPv} onPlay={playMove} />
-        <div className="statusBar">
-          <span title="Global analysis mode. ON means auto-analysis after moves.">Analysis: {analysisEnabled ? 'ON' : 'OFF'}</span>
-          <span title="Move number currently being analyzed by KataGo.">Target position: {analysisTargetMove}</span>
-          <span title="Current board move number.">Current position: {state.moves.length}</span>
-          <span title="Total root visits in latest frame.">Visits: {selectedFrame?.rootInfo?.visits ?? 0}</span>
-          <span title="Winrate for side to move in latest frame.">Winrate: {(((selectedFrame?.rootInfo?.winrate ?? 0) * 100)).toFixed(1)}%</span>
-          <span title="Score lead from latest frame (points).">Lead: {(selectedFrame?.rootInfo?.scoreLead ?? 0).toFixed(2)}</span>
-          <span title="Whether KataGo is currently searching.">Search: {selectedFrame?.isDuringSearch ? 'running' : 'idle'}</span>
+        <div className="boardActions">
+          <button
+            className={stonesOnly ? 'activeToggle' : ''}
+            title="Show only stones on the board, without labels and overlays."
+            onClick={() => setStonesOnly((v) => !v)}
+          >
+            {stonesOnly ? 'Show Overlays' : 'Stones Only'}
+          </button>
         </div>
+
+        <GoBoard
+          state={state}
+          frame={selectedFrame ?? liveFrame}
+          hoveredPv={hoveredPv}
+          stonesOnly={stonesOnly}
+          interactionDisabled={!canPlayOnBoard}
+          onPlay={playMove}
+        />
+        {!stonesOnly ? (
+          <div className="statusBar">
+            <span title="Global analysis mode. ON means auto-analysis after moves.">Analysis: {analysisEnabled ? 'ON' : 'OFF'}</span>
+            <span title="Move number currently being analyzed by KataGo.">Target position: {analysisTargetMove}</span>
+            <span title="Current board move number.">Current position: {state.moves.length}</span>
+            <span title="Total root visits in latest frame.">Visits: {selectedFrame?.rootInfo?.visits ?? 0}</span>
+            <span title="Winrate for side to move in latest frame.">Winrate: {(((selectedFrame?.rootInfo?.winrate ?? 0) * 100)).toFixed(1)}%</span>
+            <span title="Score lead from latest frame (points).">Lead: {(selectedFrame?.rootInfo?.scoreLead ?? 0).toFixed(2)}</span>
+            <span title="Whether KataGo is currently searching.">Search: {selectedFrame?.isDuringSearch ? 'running' : 'idle'}</span>
+          </div>
+        ) : null}
         {lastError ? <div className="errorBanner">{lastError}</div> : null}
       </section>
 
-      <section className="right" ref={rightRef} title="Правая панель: управление анализом, кандидаты, дерево вариантов и логи.">
-        <div className="panel" title="Панель действий для партии и анализа.">
-          <h2 title="Основные кнопки управления.">Controls</h2>
-          <div className="rightControls">
-            <button title="Create a new empty game using current settings." onClick={createGame} disabled={!wsReady}>New Game</button>
-            <label title="Load an SGF and replace current game." className="upload buttonLike">
+      <section className="right" title="Right panel: moves, analysis, variation tree, and logs.">
+        <div className="panel" title="Game actions and move selection.">
+          <h2 title="Game controls.">Game and Moves</h2>
+          <p className="panelHint" title="First create/load a game, then choose a move position.">
+            Create a game, load SGF, and choose the position to analyze.
+          </p>
+          <div className="rightControls twoCols">
+            <button
+              title={canMutateGame ? 'Create a new empty game using the settings on the left.' : blockedByAnalysisHint}
+              onClick={createGame}
+              disabled={!canMutateGame}
+            >
+              New Game
+            </button>
+            <label
+              title={canMutateGame ? 'Upload an SGF file and replace the current game.' : blockedByAnalysisHint}
+              className={`upload buttonLike ${canMutateGame ? '' : 'disabled'}`}
+            >
               Upload SGF
               <input
+                title={canMutateGame ? 'Choose an SGF file to upload.' : blockedByAnalysisHint}
                 type="file"
                 accept=".sgf"
+                disabled={!canMutateGame}
                 onChange={(e) => {
                   const file = e.target.files?.[0];
                   if (file) onUploadSgf(file);
                 }}
               />
             </label>
-            <button title="Remove last move from current line." onClick={() => send(wsRef.current, { type: 'undo_move' })} disabled={!wsReady}>Undo</button>
-            <label title="Visit budget per analysis request." className="groupInline">
-              Max visits
-              <input
-                title="Visit budget per analysis request."
-                type="number"
-                min={50}
-                step={50}
-                value={maxVisits}
-                onChange={(e) => setMaxVisits(Number(e.target.value))}
-              />
-            </label>
-            <button title="Analyze the current board position now." onClick={() => analyzeMoveNumber(state.moves.length)} disabled={!wsReady}>Analyze Current</button>
-            <button title="Analyze selected position from move history." onClick={() => analyzeMoveNumber(selectedMove)} disabled={!wsReady}>Analyze Selected</button>
-            <button title="Play KataGo suggested move at selected position." onClick={playKataGoMoveFromSelected} disabled={!wsReady}>KataGo Move Here</button>
             <button
-              className="dangerButton"
-              title="Stop current KataGo search immediately."
-              onClick={() => send(wsRef.current, { type: 'stop_analysis' })}
-              disabled={!wsReady}
+              title={canMutateGame ? 'Undo the last move in the current line.' : blockedByAnalysisHint}
+              onClick={() => send(wsRef.current, { type: 'undo_move' })}
+              disabled={!canMutateGame}
             >
-              Stop Thinking
+              Undo Move
+            </button>
+            <button
+              title={
+                canPlayKataGoMove
+                  ? 'Play KataGo suggested move for selected position and candidate.'
+                  : isAnalysisRunning
+                    ? blockedByAnalysisHint
+                    : missingAnalysisHint
+              }
+              onClick={playKataGoMoveFromSelected}
+              disabled={!canPlayKataGoMove}
+            >
+              Play KataGo Move
             </button>
           </div>
         </div>
 
-        <div className="panel" title="Выбор позиции по номеру хода для просмотра снимков анализа.">
-          <h2 title="Список всех позиций текущей партии.">Move History</h2>
-          <div className="list" title="Нажмите позицию, чтобы загрузить её историю анализа.">
+        <div className="panel" title="Select a move number to view analysis snapshots.">
+          <h2 title="All positions in the current game.">Position Selection</h2>
+          <p className="panelHint" title="Click a position to open its cached analysis history.">
+            Pick a move, then run analysis for either the current or selected position.
+          </p>
+          <div className="list" title={canSelectPosition ? 'Click a position to load its analysis history.' : blockedByAnalysisHint}>
             {Array.from({ length: state.moves.length + 1 }).map((_, i) => (
-              <button title={`Show analysis snapshots for position ${i}.`} key={i} onClick={() => requestHistory(i)} className={selectedMove === i ? 'active' : ''}>
+              <button
+                title={canSelectPosition ? `Show analysis for position ${i}.` : blockedByAnalysisHint}
+                key={i}
+                onClick={() => requestHistory(i)}
+                className={selectedMove === i ? 'active' : ''}
+                disabled={!canSelectPosition}
+              >
                 Position {i}
               </button>
             ))}
           </div>
         </div>
 
-        <div className="panel" title="Лучшие ходы от KataGo для выбранной позиции.">
-          <h2 title="Таблица рекомендованных ходов.">Candidates</h2>
-          <table title="Наведите на строку, чтобы выделить вариант на доске.">
+        <div className="panel" title="Start and stop analysis controls.">
+          <h2 title="KataGo analysis controls.">Analysis</h2>
+          <p className="panelHint" title="Set visit budget and choose which position to analyze.">
+            Separate buttons for analyzing current and selected positions.
+          </p>
+          <div className="analysisGuide" title="Suggested analysis flow.">
+            <span className="guideStep guideDone">1. Select position ({selectedMove})</span>
+            <span className={`guideStep ${isAnalysisRunning ? 'guideCurrent' : hasSelectedAnalysis ? 'guideDone' : 'guideTodo'}`}>
+              2. Run analysis
+            </span>
+            <span className={`guideStep ${canPlayKataGoMove ? 'guideDone' : hasSelectedAnalysis ? 'guideCurrent' : 'guideTodo'}`}>
+              3. Play KataGo move
+            </span>
+          </div>
+          <div className="analysisNote" title="Current analysis status.">{analysisStateMessage}</div>
+          <div className="rightControls twoCols">
+            <label title="Visits budget per analysis run." className="groupInline fullWidth">
+              Visits limit
+              <input
+                title={canRunAnalysis ? 'Visits budget per analysis run.' : blockedByAnalysisHint}
+                type="number"
+                min={50}
+                step={50}
+                value={maxVisits}
+                onChange={(e) => setMaxVisits(Number(e.target.value))}
+                disabled={!canRunAnalysis}
+              />
+            </label>
+            <button
+              title={canRunAnalysis ? 'Run analysis for the current board position.' : blockedByAnalysisHint}
+              onClick={() => analyzeMoveNumber(state.moves.length)}
+              disabled={!canRunAnalysis}
+            >
+              Analyze Current
+            </button>
+            <button
+              title={canRunAnalysis ? 'Run analysis for the position selected in move history.' : blockedByAnalysisHint}
+              onClick={() => analyzeMoveNumber(selectedMove)}
+              disabled={!canRunAnalysis}
+            >
+              Analyze Selected
+            </button>
+            <button
+              className="dangerButton"
+              title="Immediately stop the current KataGo search."
+              onClick={() => send(wsRef.current, { type: 'stop_analysis' })}
+              disabled={!wsReady || !isAnalysisRunning}
+            >
+              Stop Analysis
+            </button>
+          </div>
+        </div>
+
+        <div className="panel" title="Best KataGo candidate moves for the selected position.">
+          <h2 title="Recommended move table.">Candidates</h2>
+          <p className="panelHint" title="Hover a row to highlight its variation on the board.">
+            Hover a row to highlight the corresponding variation.
+          </p>
+          <table title="Hover a row to highlight the variation on the board.">
             <thead>
               <tr>
                 <th title="Candidate rank from KataGo (1 = best).">#</th>
@@ -261,28 +397,28 @@ export default function Page() {
                   className={hoveredRank === m.order ? 'rowHover' : ''}
                   title={`PV: ${[m.move, ...(m.pv ?? [])].slice(0, 8).join(' ')}`}
                 >
-                  <td title="Ранг кандидата.">{m.order + 1}</td>
-                  <td title="Координата хода.">{m.move}</td>
-                  <td title="Сколько симуляций пришлось на ход.">{m.visits}</td>
-                  <td title="Внутренний вес кандидата в поиске.">{m.weight?.toFixed(2)}</td>
-                  <td title="Оценка вероятности победы.">{(100 * (m.winrate ?? 0)).toFixed(1)}%</td>
-                  <td title="Оценка лидерства в очках.">{m.scoreLead?.toFixed(2)}</td>
+                  <td title="Candidate rank.">{m.order + 1}</td>
+                  <td title="Move coordinate.">{m.move}</td>
+                  <td title="Number of simulations for this move.">{m.visits}</td>
+                  <td title="Internal candidate weight in search.">{m.weight?.toFixed(2)}</td>
+                  <td title="Estimated win probability.">{(100 * (m.winrate ?? 0)).toFixed(1)}%</td>
+                  <td title="Estimated score lead in points.">{m.scoreLead?.toFixed(2)}</td>
                 </tr>
               ))}
             </tbody>
           </table>
         </div>
 
-        <div className="panel" title="Дерево продолжений, построенное из principal variation.">
-          <h2 title="Главные варианты из текущего анализа.">Variation Tree (from PV)</h2>
+        <div className="panel" title="Variation tree built from principal variations.">
+          <h2 title="Main lines from the current analysis.">Variation Tree (PV)</h2>
           <AnalysisTree frame={selectedFrame} />
         </div>
 
-        <div className="panel" title="Служебные сообщения движка и соединения.">
-          <h2 title="Логи backend/KataGo в реальном времени.">Engine Logs</h2>
+        <div className="panel" title="Engine and connection service messages.">
+          <h2 title="Realtime backend/KataGo logs.">Engine Logs</h2>
           <div title="WebSocket state between browser and backend.">Socket: {wsReady ? 'connected' : 'disconnected'}</div>
-          <div title="Whether current board position has a received analysis frame.">Live frame at current position: {currentFrame ? 'yes' : 'no'}</div>
-          <pre ref={logsRef} title="Автопрокрутка до последней записи включена.">{logs.slice(-120).join('\n')}</pre>
+          <div title="Whether an analysis frame exists for the current board position.">Analysis frame for current position: {currentFrame ? 'yes' : 'no'}</div>
+          <pre ref={logsRef} title="This log area auto-scrolls to the latest message.">{logs.slice(-120).join('\n')}</pre>
         </div>
       </section>
     </main>

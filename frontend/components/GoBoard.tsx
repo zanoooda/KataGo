@@ -24,11 +24,15 @@ export function GoBoard({
   state,
   frame,
   hoveredPv,
+  stonesOnly,
+  interactionDisabled,
   onPlay,
 }: {
   state: GameStatePayload;
   frame: AnalysisFrame | null;
   hoveredPv: string[];
+  stonesOnly: boolean;
+  interactionDisabled: boolean;
   onPlay: (x: number, y: number) => void;
 }) {
   const px = 740;
@@ -68,12 +72,14 @@ export function GoBoard({
   return (
     <div className="boardShell">
       <div className="board" style={{ width: px, height: px }}>
-        <div className="boardLegend">
-          <span><i className="legend best" /> Best move</span>
-          <span><i className="legend alt" /> Alternatives</span>
-          <span><i className="legend pv" /> PV hover</span>
-          <span><i className="legend last" /> Last played</span>
-        </div>
+        {!stonesOnly ? (
+          <div className="boardLegend">
+            <span><i className="legend best" /> Best move</span>
+            <span><i className="legend alt" /> Alternatives</span>
+            <span><i className="legend pv" /> PV hover</span>
+            <span><i className="legend last" /> Last played</span>
+          </div>
+        ) : null}
         {Array.from({ length: size }).map((_, i) => (
           <div
             key={`h-${i}`}
@@ -100,11 +106,11 @@ export function GoBoard({
               height: grid * 0.9,
             }}
           >
-            <span className="stoneLabel">{i >= state.initialStones.length ? i - state.initialStones.length + 1 : ''}</span>
+            {!stonesOnly ? <span className="stoneLabel">{i >= state.initialStones.length ? i - state.initialStones.length + 1 : ''}</span> : null}
           </div>
         ))}
 
-        {lastPlayedMove ? (
+        {!stonesOnly && lastPlayedMove ? (
           <div
             className="lastMoveMark"
             style={{
@@ -116,38 +122,42 @@ export function GoBoard({
           />
         ) : null}
 
-        {candidates.map((c, i) => (
-          <div
-            key={`cand-${i}`}
-            className={`candidate candidateRank${Math.min(c.order, 5)}`}
-            style={{
-              left: padding + c.x * grid - grid * (0.25 + c.ratio * 0.47),
-              top: padding + c.y * grid - grid * (0.25 + c.ratio * 0.47),
-              width: grid * (0.5 + c.ratio * 0.94),
-              height: grid * (0.5 + c.ratio * 0.94),
-            }}
-            title={`#${c.order} | Visits ${c.visits} | Lead ${c.scoreLead.toFixed(2)} | Winrate ${(c.winrate * 100).toFixed(1)}%`}
-          >
-            <b>{c.order}</b>
-            <small>{c.scoreLead >= 0 ? `+${c.scoreLead.toFixed(1)}` : c.scoreLead.toFixed(1)}</small>
-            <small>{formatVisits(c.visits)}</small>
-          </div>
-        ))}
+        {!stonesOnly
+          ? candidates.map((c, i) => (
+              <div
+                key={`cand-${i}`}
+                className={`candidate candidateRank${Math.min(c.order, 5)}`}
+                style={{
+                  left: padding + c.x * grid - grid * (0.25 + c.ratio * 0.47),
+                  top: padding + c.y * grid - grid * (0.25 + c.ratio * 0.47),
+                  width: grid * (0.5 + c.ratio * 0.94),
+                  height: grid * (0.5 + c.ratio * 0.94),
+                }}
+                title={`#${c.order} | Visits ${c.visits} | Lead ${c.scoreLead.toFixed(2)} | Winrate ${(c.winrate * 100).toFixed(1)}%`}
+              >
+                <b>{c.order}</b>
+                <small>{c.scoreLead >= 0 ? `+${c.scoreLead.toFixed(1)}` : c.scoreLead.toFixed(1)}</small>
+                <small>{formatVisits(c.visits)}</small>
+              </div>
+            ))
+          : null}
 
-        {pvMarkers.map((m, i) => (
-          <div
-            key={`pv-${i}`}
-            className="pvMarker"
-            style={{
-              left: padding + m.x * grid - grid * 0.28,
-              top: padding + m.y * grid - grid * 0.28,
-              width: grid * 0.56,
-              height: grid * 0.56,
-            }}
-          >
-            {m.index}
-          </div>
-        ))}
+        {!stonesOnly
+          ? pvMarkers.map((m, i) => (
+              <div
+                key={`pv-${i}`}
+                className="pvMarker"
+                style={{
+                  left: padding + m.x * grid - grid * 0.28,
+                  top: padding + m.y * grid - grid * 0.28,
+                  width: grid * 0.56,
+                  height: grid * 0.56,
+                }}
+              >
+                {m.index}
+              </div>
+            ))
+          : null}
 
         {Array.from({ length: size * size }).map((_, idx) => {
           const x = idx % size;
@@ -157,12 +167,14 @@ export function GoBoard({
             <button
               key={`hit-${idx}`}
               className="hit"
+              title={interactionDisabled ? 'Disabled while analysis is running.' : 'Play move'}
               style={{
                 left: padding + x * grid - grid * 0.5,
                 top: padding + y * grid - grid * 0.5,
                 width: grid,
                 height: grid,
               }}
+              disabled={interactionDisabled}
               onClick={() => onPlay(x, y)}
             />
           );
