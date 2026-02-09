@@ -103,9 +103,21 @@ button:disabled:hover {
 .legend.best { background: rgba(62, 216, 255, 0.95); }
 .legend.alt { background: rgba(255, 211, 79, 0.95); }
 .legend.pv { background: rgba(255, 102, 102, 0.95); }
-.legend.last { background: transparent; border: 2px solid #57e2ff; }
 .line { position: absolute; background: rgba(0,0,0,0.55); }
 .hit { position: absolute; opacity: 0; border: 0; }
+.hitBlocked { pointer-events: none; }
+.coordLabel {
+  position: absolute;
+  transform: translate(-50%, -50%);
+  font-size: 10px;
+  font-weight: 700;
+  color: rgba(24, 16, 8, 0.85);
+  pointer-events: none;
+  z-index: 3;
+}
+.coordY {
+  transform: translate(0, -50%);
+}
 
 .stone {
   position: absolute;
@@ -125,8 +137,9 @@ button:disabled:hover {
 .lastMoveMark {
   position: absolute;
   border-radius: 999px;
-  border: 2px solid #57e2ff;
-  box-shadow: 0 0 0 2px rgba(4, 27, 34, 0.8);
+  border: 2px solid #000;
+  background: rgba(0, 0, 0, 0.25);
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.45);
   pointer-events: none;
   z-index: 14;
 }
@@ -172,6 +185,9 @@ button:disabled:hover {
 .candidateRank5 {
   background: rgba(255, 166, 110, 0.92);
 }
+.candidateFocused {
+  box-shadow: 0 0 0 2px rgba(0, 0, 0, 0.7), 0 0 0 4px rgba(255, 255, 255, 0.55);
+}
 
 .pvMarker {
   position: absolute;
@@ -203,6 +219,11 @@ button:disabled:hover {
   font-size: 12px;
   line-height: 1.35;
 }
+.analysisExplain {
+  margin: 0 0 8px;
+  font-size: 12px;
+  color: #c6d8e2;
+}
 .analysisGuide {
   display: flex;
   flex-wrap: wrap;
@@ -232,6 +253,33 @@ button:disabled:hover {
   margin: 0 0 10px;
   font-size: 12px;
   color: #c6d8e2;
+}
+.analysisEstimate {
+  margin: 0 0 10px;
+  font-size: 13px;
+  font-weight: 700;
+  color: #d8f1ff;
+}
+.analysisProgressWrap {
+  margin: 0 0 10px;
+}
+.analysisProgressText {
+  font-size: 12px;
+  color: #cfe0e8;
+  margin-bottom: 4px;
+}
+.analysisProgressTrack {
+  height: 8px;
+  border-radius: 999px;
+  background: #0d1f28;
+  border: 1px solid #2b4a59;
+  overflow: hidden;
+}
+.analysisProgressFill {
+  height: 100%;
+  width: 0;
+  background: linear-gradient(90deg, #4aa4ff, #54d8a8);
+  transition: width 180ms ease;
 }
 
 .rightControls {

@@ -89,6 +89,8 @@ export default function Page() {
   const selectedFrames = framesByMove[selectedMove] ?? [];
   const selectedFrame = useMemo(() => selectedFrames[selectedFrames.length - 1] ?? null, [selectedFrames]);
   const currentFrame = useMemo(() => (framesByMove[state.moves.length] ?? []).slice(-1)[0] ?? null, [framesByMove, state.moves.length]);
+  const analysisFrames = framesByMove[analysisTargetMove] ?? [];
+  const analysisFrame = useMemo(() => analysisFrames[analysisFrames.length - 1] ?? null, [analysisFrames]);
   const hoveredMove = selectedFrame?.moveInfos?.[hoveredRank] ?? null;
   const hoveredPv = hoveredMove ? [hoveredMove.move, ...(hoveredMove.pv ?? [])] : [];
   const isAnalysisRunning = Boolean(
@@ -105,12 +107,37 @@ export default function Page() {
   const canPlayKataGoMove = wsReady && !isAnalysisRunning && hasSelectedAnalysis;
   const canPlayOnBoard = wsReady && !isAnalysisRunning;
   const blockedByAnalysisHint = 'Disabled while analysis is running. Wait for completion or click Stop Analysis.';
-  const missingAnalysisHint = 'Run analysis first for the selected position, then play KataGo move.';
+  const missingAnalysisHint = 'Run analysis first for the selected position, then play the top KataGo move (#1).';
   const analysisStateMessage = isAnalysisRunning
     ? `Analyzing position ${analysisTargetMove}...`
     : hasSelectedAnalysis
-      ? `Analysis is ready for position ${selectedMove}. Hover candidates and play a move.`
+      ? `Analysis is ready for position ${selectedMove}. Play KataGo Move uses candidate #1.`
       : `No analysis for position ${selectedMove} yet. Click Analyze Selected.`;
+  const getPlayerToMoveAt = (moveNumber: number): 'B' | 'W' => {
+    const total = state.moves.length;
+    const target = Math.max(0, Math.min(moveNumber, total));
+    const stepsBack = total - target;
+    if (stepsBack % 2 === 0) return state.currentPlayer;
+    return state.currentPlayer === 'B' ? 'W' : 'B';
+  };
+  const selectedPlayerToMove = getPlayerToMoveAt(selectedMove);
+  const analysisPlayerToMove = getPlayerToMoveAt(analysisTargetMove);
+  const analysisVisits = analysisFrame?.rootInfo?.visits ?? 0;
+  const analysisProgress = isAnalysisRunning
+    ? Math.min(99, Math.round((analysisVisits / Math.max(1, maxVisits)) * 100))
+    : analysisFrames.length > 0
+      ? 100
+      : 0;
+  const selectedScoreLead = selectedFrame?.rootInfo?.scoreLead;
+  const estimateScoreText =
+    selectedScoreLead === undefined || selectedScoreLead === null
+      ? 'No estimate yet. Run analysis for this position.'
+      : selectedScoreLead === 0
+        ? 'Estimated score: even (0.0)'
+        : (() => {
+            const leader = selectedScoreLead > 0 ? selectedPlayerToMove : selectedPlayerToMove === 'B' ? 'W' : 'B';
+            return `Estimated score: ${leader}+${Math.abs(selectedScoreLead).toFixed(1)}`;
+          })();
 
   useEffect(() => {
     setHoveredRank(0);
@@ -147,10 +174,13 @@ export default function Page() {
     setLastError(null);
     send(wsRef.current, { type: 'start_analysis', maxVisits, moveNumber });
   };
+  const estimateScoreForSelected = () => {
+    analyzeMoveNumber(selectedMove);
+  };
 
   const playKataGoMoveFromSelected = () => {
     setLastError(null);
-    send(wsRef.current, { type: 'play_katago_move', moveNumber: selectedMove, rank: hoveredRank });
+    send(wsRef.current, { type: 'play_katago_move', moveNumber: selectedMove, rank: 0 });
   };
 
   const requestHistory = (moveNumber: number) => {
@@ -229,13 +259,14 @@ export default function Page() {
           state={state}
           frame={selectedFrame ?? liveFrame}
           hoveredPv={hoveredPv}
+          hoveredRank={hoveredRank}
           stonesOnly={stonesOnly}
           interactionDisabled={!canPlayOnBoard}
           onPlay={playMove}
         />
         {!stonesOnly ? (
           <div className="statusBar">
-            <span title="Global analysis mode. ON means auto-analysis after moves.">Analysis: {analysisEnabled ? 'ON' : 'OFF'}</span>
+            <span title="Whether KataGo is currently searching for the latest requested position.">Analysis search: {analysisEnabled ? 'running' : 'idle'}</span>
             <span title="Move number currently being analyzed by KataGo.">Target position: {analysisTargetMove}</span>
             <span title="Current board move number.">Current position: {state.moves.length}</span>
             <span title="Total root visits in latest frame.">Visits: {selectedFrame?.rootInfo?.visits ?? 0}</span>
@@ -287,7 +318,7 @@ export default function Page() {
             <button
               title={
                 canPlayKataGoMove
-                  ? 'Play KataGo suggested move for selected position and candidate.'
+                  ? 'Play top KataGo candidate (#1) for the selected position.'
                   : isAnalysisRunning
                     ? blockedByAnalysisHint
                     : missingAnalysisHint
@@ -323,8 +354,14 @@ export default function Page() {
         <div className="panel" title="Start and stop analysis controls.">
           <h2 title="KataGo analysis controls.">Analysis</h2>
           <p className="panelHint" title="Set visit budget and choose which position to analyze.">
-            Separate buttons for analyzing current and selected positions.
+            Analyze Current: analyzes move {state.moves.length} (to move: {getPlayerToMoveAt(state.moves.length) === 'B' ? 'Black' : 'White'}). Analyze Selected: analyzes move {selectedMove} (to move: {selectedPlayerToMove === 'B' ? 'Black' : 'White'}).
           </p>
+          <div className="analysisExplain" title="What analysis and move actions do.">
+            Analyze computes estimates only. It does not play. Play KataGo Move applies the best analyzed move (#1) on the board.
+          </div>
+          <div className="analysisExplain" title="Current color KataGo is evaluating.">
+            KataGo thinking for: {analysisPlayerToMove === 'B' ? 'Black' : 'White'} at position {analysisTargetMove}.
+          </div>
           <div className="analysisGuide" title="Suggested analysis flow.">
             <span className="guideStep guideDone">1. Select position ({selectedMove})</span>
             <span className={`guideStep ${isAnalysisRunning ? 'guideCurrent' : hasSelectedAnalysis ? 'guideDone' : 'guideTodo'}`}>
@@ -334,7 +371,16 @@ export default function Page() {
               3. Play KataGo move
             </span>
           </div>
+          <div className="analysisProgressWrap" title="Progress of current analysis request.">
+            <div className="analysisProgressText">
+              Progress: {analysisProgress}% ({analysisVisits}/{maxVisits} visits)
+            </div>
+            <div className="analysisProgressTrack">
+              <div className="analysisProgressFill" style={{ width: `${analysisProgress}%` }} />
+            </div>
+          </div>
           <div className="analysisNote" title="Current analysis status.">{analysisStateMessage}</div>
+          <div className="analysisEstimate" title="Estimated final score for selected position.">{estimateScoreText}</div>
           <div className="rightControls twoCols">
             <label title="Visits budget per analysis run." className="groupInline fullWidth">
               Visits limit
@@ -361,6 +407,13 @@ export default function Page() {
               disabled={!canRunAnalysis}
             >
               Analyze Selected
+            </button>
+            <button
+              title={canRunAnalysis ? 'Run analysis for selected position and show estimated score.' : blockedByAnalysisHint}
+              onClick={estimateScoreForSelected}
+              disabled={!canRunAnalysis}
+            >
+              Estimate Score
             </button>
             <button
               className="dangerButton"
@@ -394,6 +447,7 @@ export default function Page() {
                 <tr
                   key={`${m.move}-${m.order}`}
                   onMouseEnter={() => setHoveredRank(m.order)}
+                  onMouseLeave={() => setHoveredRank(0)}
                   className={hoveredRank === m.order ? 'rowHover' : ''}
                   title={`PV: ${[m.move, ...(m.pv ?? [])].slice(0, 8).join(' ')}`}
                 >

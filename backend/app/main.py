@@ -47,7 +47,7 @@ class Session:
         self.ws = ws
         self.state = GameState()
         self.engine = KataGoEngine()
-        self.enabled = True
+        self.enabled = False
         self.max_visits = 1200
         self.frames_by_move: dict[int, list[dict[str, Any]]] = defaultdict(list)
         self.lock = asyncio.Lock()
@@ -68,8 +68,7 @@ class Session:
                 },
             }
         )
-        if self.enabled:
-            await self.start_analysis(move_number=len(self.state.moves))
+        # Manual-only analysis mode: do not auto-start on session init.
 
     async def stop(self) -> None:
         try:
@@ -111,8 +110,7 @@ class Session:
 
         self.frames_by_move = defaultdict(list)
         await self.send({"type": "game_state", "payload": self.state.to_payload()})
-        if self.enabled:
-            await self.start_analysis(move_number=len(self.state.moves))
+        # Manual-only analysis mode: no auto-analysis after creating/loading game.
 
     async def play_move(self, msg: dict[str, Any]) -> None:
         move = Move(
@@ -124,8 +122,7 @@ class Session:
         self.state.moves.append(move)
         self.state.current_player = "W" if move.player == "B" else "B"
         await self.send({"type": "game_state", "payload": self.state.to_payload()})
-        if self.enabled:
-            await self.start_analysis(move_number=len(self.state.moves))
+        # Manual-only analysis mode: no auto-analysis after move.
 
     async def undo(self) -> None:
         if not self.state.moves:
@@ -133,8 +130,7 @@ class Session:
         self.state.moves.pop()
         self.state.current_player = "W" if len(self.state.moves) % 2 == 1 else "B"
         await self.send({"type": "game_state", "payload": self.state.to_payload()})
-        if self.enabled:
-            await self.start_analysis(move_number=len(self.state.moves))
+        # Manual-only analysis mode: no auto-analysis after undo.
 
     async def start_analysis(self, max_visits: int | None = None, move_number: int | None = None) -> None:
         if max_visits is not None:
@@ -267,8 +263,7 @@ class Session:
         self.state.current_player = "W" if player == "B" else "B"
 
         await self.send({"type": "game_state", "payload": self.state.to_payload()})
-        if self.enabled:
-            await self.start_analysis(move_number=len(self.state.moves))
+        # Manual-only analysis mode: no auto-analysis after applying KataGo move.
 
     async def _on_katago_update(self, data: dict[str, Any]) -> None:
         if data.get("type") == "katago_log":
@@ -301,6 +296,17 @@ class Session:
         await self.send({"type": "analysis_update", "payload": frame})
 
         if not frame["isDuringSearch"]:
+            self.enabled = False
+            await self.send(
+                {
+                    "type": "analysis_status",
+                    "payload": {
+                        "enabled": False,
+                        "targetMoveNumber": self.analysis_target_move,
+                        "maxVisits": self.max_visits,
+                    },
+                }
+            )
             await self.send_history(move_number)
 
 

@@ -24,6 +24,7 @@ export function GoBoard({
   state,
   frame,
   hoveredPv,
+  hoveredRank,
   stonesOnly,
   interactionDisabled,
   onPlay,
@@ -31,6 +32,7 @@ export function GoBoard({
   state: GameStatePayload;
   frame: AnalysisFrame | null;
   hoveredPv: string[];
+  hoveredRank: number;
   stonesOnly: boolean;
   interactionDisabled: boolean;
   onPlay: (x: number, y: number) => void;
@@ -77,9 +79,26 @@ export function GoBoard({
             <span><i className="legend best" /> Best move</span>
             <span><i className="legend alt" /> Alternatives</span>
             <span><i className="legend pv" /> PV hover</span>
-            <span><i className="legend last" /> Last played</span>
           </div>
         ) : null}
+        {Array.from({ length: size }).map((_, i) => (
+          <div
+            key={`x-label-${i}`}
+            className="coordLabel coordX"
+            style={{ left: padding + i * grid, top: px - padding + 12 }}
+          >
+            {COLS[i]}
+          </div>
+        ))}
+        {Array.from({ length: size }).map((_, i) => (
+          <div
+            key={`y-label-${i}`}
+            className="coordLabel coordY"
+            style={{ left: 12, top: padding + i * grid }}
+          >
+            {size - i}
+          </div>
+        ))}
         {Array.from({ length: size }).map((_, i) => (
           <div
             key={`h-${i}`}
@@ -110,7 +129,7 @@ export function GoBoard({
           </div>
         ))}
 
-        {!stonesOnly && lastPlayedMove ? (
+        {lastPlayedMove ? (
           <div
             className="lastMoveMark"
             style={{
@@ -126,7 +145,7 @@ export function GoBoard({
           ? candidates.map((c, i) => (
               <div
                 key={`cand-${i}`}
-                className={`candidate candidateRank${Math.min(c.order, 5)}`}
+                className={`candidate candidateRank${Math.min(c.order, 5)} ${c.order - 1 === hoveredRank ? 'candidateFocused' : ''}`}
                 style={{
                   left: padding + c.x * grid - grid * (0.25 + c.ratio * 0.47),
                   top: padding + c.y * grid - grid * (0.25 + c.ratio * 0.47),
@@ -135,7 +154,6 @@ export function GoBoard({
                 }}
                 title={`#${c.order} | Visits ${c.visits} | Lead ${c.scoreLead.toFixed(2)} | Winrate ${(c.winrate * 100).toFixed(1)}%`}
               >
-                <b>{c.order}</b>
                 <small>{c.scoreLead >= 0 ? `+${c.scoreLead.toFixed(1)}` : c.scoreLead.toFixed(1)}</small>
                 <small>{formatVisits(c.visits)}</small>
               </div>
@@ -166,7 +184,7 @@ export function GoBoard({
           return (
             <button
               key={`hit-${idx}`}
-              className="hit"
+              className={`hit ${interactionDisabled ? 'hitBlocked' : ''}`}
               title={interactionDisabled ? 'Disabled while analysis is running.' : 'Play move'}
               style={{
                 left: padding + x * grid - grid * 0.5,
@@ -174,7 +192,6 @@ export function GoBoard({
                 width: grid,
                 height: grid,
               }}
-              disabled={interactionDisabled}
               onClick={() => onPlay(x, y)}
             />
           );
