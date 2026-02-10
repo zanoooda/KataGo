@@ -48,7 +48,9 @@ class Session:
         self.state = GameState()
         self.engine = KataGoEngine()
         self.enabled = True
-        self.max_visits = 1200
+        self.max_visits = 300
+        self.preview_visits = 20
+        self.pending_full_for_move: int | None = None
         self.frames_by_move: dict[int, list[dict[str, Any]]] = defaultdict(list)
         self.lock = asyncio.Lock()
         self.analysis_target_move = 0
@@ -65,6 +67,7 @@ class Session:
                     "enabled": self.enabled,
                     "targetMoveNumber": self.analysis_target_move,
                     "maxVisits": self.max_visits,
+                    "previewVisits": self.preview_visits,
                 },
             }
         )
@@ -116,7 +119,7 @@ class Session:
 
     async def play_move(self, msg: dict[str, Any]) -> None:
         move = Move(
-            player=str(msg.get("player", self.state.current_player)).upper(),
+            player=self.state.current_player,
             x=msg.get("x"),
             y=msg.get("y"),
             is_pass=bool(msg.get("isPass", False)),
@@ -142,9 +145,20 @@ class Session:
         target_move = len(self.state.moves) if move_number is None else int(move_number)
         target_state = self._state_for_move_number(target_move)
         self.analysis_target_move = len(target_state.moves)
+        preview_budget = min(self.max_visits, self.preview_visits)
+        self.pending_full_for_move = self.analysis_target_move if self.max_visits > preview_budget else None
         try:
             await self.engine.start(self._on_katago_update)
-            await self.engine.analyze(target_state, AnalysisRequest(max_visits=self.max_visits, report_every=0.15))
+            await self.engine.analyze(
+                target_state,
+                AnalysisRequest(
+                    max_visits=preview_budget,
+                    report_every=0.015,
+                    include_policy=False,
+                    include_ownership=False,
+                    include_moves_ownership=False,
+                ),
+            )
             self.enabled = True
             await self.send(
                 {
@@ -153,11 +167,13 @@ class Session:
                         "enabled": True,
                         "targetMoveNumber": self.analysis_target_move,
                         "maxVisits": self.max_visits,
+                        "previewVisits": self.preview_visits,
                     },
                 }
             )
         except FileNotFoundError:
             self.enabled = False
+            self.pending_full_for_move = None
             await self.send(
                 {
                     "type": "error",
@@ -168,6 +184,7 @@ class Session:
             )
         except PermissionError:
             self.enabled = False
+            self.pending_full_for_move = None
             await self.send(
                 {
                     "type": "error",
@@ -181,6 +198,7 @@ class Session:
             )
         except OSError as exc:
             self.enabled = False
+            self.pending_full_for_move = None
             await self.send(
                 {
                     "type": "error",
@@ -191,6 +209,7 @@ class Session:
             )
         except RuntimeError as exc:
             self.enabled = False
+            self.pending_full_for_move = None
             await self.send(
                 {
                     "type": "error",
@@ -201,15 +220,17 @@ class Session:
             )
 
     async def stop_analysis(self) -> None:
-        self.enabled = False
+        # "Stop thinking" should stop only the current search, but keep auto-analysis enabled.
+        self.pending_full_for_move = None
         await self.engine.terminate_current()
         await self.send(
             {
                 "type": "analysis_status",
                 "payload": {
-                    "enabled": False,
+                    "enabled": self.enabled,
                     "targetMoveNumber": self.analysis_target_move,
                     "maxVisits": self.max_visits,
+                    "previewVisits": self.preview_visits,
                 },
             }
         )
@@ -301,6 +322,11 @@ class Session:
         await self.send({"type": "analysis_update", "payload": frame})
 
         if not frame["isDuringSearch"]:
+            if self.enabled and self.pending_full_for_move == move_number:
+                self.pending_full_for_move = None
+                target_state = self._state_for_move_number(move_number)
+                await self.engine.analyze(target_state, AnalysisRequest(max_visits=self.max_visits, report_every=0.05))
+                return
             await self.send_history(move_number)
 
 
