@@ -29,6 +29,8 @@ export default function Page() {
   const [logs, setLogs] = useState<string[]>([]);
   const [analysisEnabled, setAnalysisEnabled] = useState(false);
   const [analysisTargetMove, setAnalysisTargetMove] = useState(0);
+  const [previewVisits, setPreviewVisits] = useState(80);
+  const [analysisStartedAt, setAnalysisStartedAt] = useState<number | null>(null);
   const [hoveredRank, setHoveredRank] = useState(0);
   const [lastError, setLastError] = useState<string | null>(null);
 
@@ -36,7 +38,7 @@ export default function Page() {
   const [rules, setRules] = useState('japanese');
   const [komi, setKomi] = useState(6.5);
   const [handicap, setHandicap] = useState(0);
-  const [maxVisits, setMaxVisits] = useState(1200);
+  const [maxVisits, setMaxVisits] = useState(300);
   const [stonesOnly, setStonesOnly] = useState(false);
 
   useEffect(() => {
@@ -45,6 +47,9 @@ export default function Page() {
         setState(event.payload);
         const moveNum = event.payload.moves.length;
         setSelectedMove(moveNum);
+        // Immediately clear displayed eval for the new current position.
+        setLiveFrame(null);
+        setFramesByMove((prev) => ({ ...prev, [moveNum]: [] }));
       }
       if (event.type === 'analysis_update') {
         setLiveFrame(event.payload);
@@ -57,6 +62,8 @@ export default function Page() {
       if (event.type === 'analysis_status') {
         setAnalysisEnabled(event.payload.enabled);
         setAnalysisTargetMove(event.payload.targetMoveNumber);
+        setPreviewVisits(event.payload.previewVisits ?? 80);
+        setAnalysisStartedAt(event.payload.enabled ? Date.now() : null);
       }
       if (event.type === 'analysis_history_snapshot') {
         setFramesByMove((prev) => ({ ...prev, [event.payload.moveNumber]: event.payload.frames }));
@@ -91,7 +98,12 @@ export default function Page() {
   const currentFrame = useMemo(() => (framesByMove[state.moves.length] ?? []).slice(-1)[0] ?? null, [framesByMove, state.moves.length]);
   const analysisFrames = framesByMove[analysisTargetMove] ?? [];
   const analysisFrame = useMemo(() => analysisFrames[analysisFrames.length - 1] ?? null, [analysisFrames]);
-  const hoveredMove = selectedFrame?.moveInfos?.[hoveredRank] ?? null;
+  const displayFrame = useMemo(() => {
+    if (selectedFrame?.moveNumber === selectedMove) return selectedFrame;
+    if (liveFrame?.moveNumber === selectedMove) return liveFrame;
+    return null;
+  }, [selectedFrame, liveFrame, selectedMove]);
+  const hoveredMove = displayFrame?.moveInfos?.[hoveredRank] ?? null;
   const hoveredPv = hoveredMove ? [hoveredMove.move, ...(hoveredMove.pv ?? [])] : [];
   const isAnalysisRunning = Boolean(
     liveFrame?.isDuringSearch ||
@@ -101,15 +113,19 @@ export default function Page() {
   const hasSelectedAnalysis = Boolean(
     selectedFrame && selectedFrame.moveNumber === selectedMove && (selectedFrame.moveInfos?.length ?? 0) > 0
   );
-  const canMutateGame = wsReady && !isAnalysisRunning;
-  const canRunAnalysis = wsReady && !isAnalysisRunning;
-  const canSelectPosition = wsReady && !isAnalysisRunning;
-  const canPlayKataGoMove = wsReady && !isAnalysisRunning && hasSelectedAnalysis;
-  const canPlayOnBoard = wsReady && !isAnalysisRunning;
-  const blockedByAnalysisHint = 'Disabled while analysis is running. Wait for completion or click Stop Analysis.';
+  const canMutateGame = wsReady;
+  const canRunAnalysis = wsReady;
+  const canSelectPosition = wsReady;
+  const canPlayKataGoMove = wsReady && hasSelectedAnalysis;
+  const canPlayOnBoard = wsReady;
+  const blockedByAnalysisHint = 'Unavailable while disconnected.';
   const missingAnalysisHint = 'Run analysis first for the selected position, then play the top KataGo move (#1).';
+  const previewBudget = Math.min(maxVisits, previewVisits);
+  const quickReady = (displayFrame?.moveInfos?.length ?? 0) > 0;
   const analysisStateMessage = isAnalysisRunning
-    ? `Analyzing position ${analysisTargetMove}...`
+    ? quickReady
+      ? `Refining position ${analysisTargetMove} with deeper visits...`
+      : `Building quick preview for position ${analysisTargetMove}...`
     : hasSelectedAnalysis
       ? `Analysis is ready for position ${selectedMove}. Play KataGo Move uses candidate #1.`
       : `No analysis for position ${selectedMove} yet. Click Analyze Selected.`;
@@ -123,12 +139,15 @@ export default function Page() {
   const selectedPlayerToMove = getPlayerToMoveAt(selectedMove);
   const analysisPlayerToMove = getPlayerToMoveAt(analysisTargetMove);
   const analysisVisits = analysisFrame?.rootInfo?.visits ?? 0;
+  const bootstrapProgress = isAnalysisRunning && analysisStartedAt ? 8 : 0;
   const analysisProgress = isAnalysisRunning
-    ? Math.min(99, Math.round((analysisVisits / Math.max(1, maxVisits)) * 100))
+    ? !quickReady
+      ? Math.max(bootstrapProgress, Math.min(25, Math.round((analysisVisits / Math.max(1, previewBudget)) * 25)))
+      : Math.max(25, Math.min(99, 25 + Math.round((analysisVisits / Math.max(1, maxVisits)) * 74)))
     : analysisFrames.length > 0
       ? 100
       : 0;
-  const selectedScoreLead = selectedFrame?.rootInfo?.scoreLead;
+  const selectedScoreLead = displayFrame?.rootInfo?.scoreLead;
   const estimateScoreText =
     selectedScoreLead === undefined || selectedScoreLead === null
       ? 'No estimate yet. Run analysis for this position.'
@@ -167,7 +186,7 @@ export default function Page() {
 
   const playMove = (x: number, y: number) => {
     if (!canPlayOnBoard) return;
-    send(wsRef.current, { type: 'play_move', x, y, player: state.currentPlayer });
+    send(wsRef.current, { type: 'play_move', x, y });
   };
 
   const analyzeMoveNumber = (moveNumber: number) => {
@@ -257,7 +276,7 @@ export default function Page() {
 
         <GoBoard
           state={state}
-          frame={selectedFrame ?? liveFrame}
+          frame={displayFrame}
           hoveredPv={hoveredPv}
           hoveredRank={hoveredRank}
           stonesOnly={stonesOnly}
@@ -269,10 +288,10 @@ export default function Page() {
             <span title="Whether KataGo is currently searching for the latest requested position.">Analysis search: {analysisEnabled ? 'running' : 'idle'}</span>
             <span title="Move number currently being analyzed by KataGo.">Target position: {analysisTargetMove}</span>
             <span title="Current board move number.">Current position: {state.moves.length}</span>
-            <span title="Total root visits in latest frame.">Visits: {selectedFrame?.rootInfo?.visits ?? 0}</span>
-            <span title="Winrate for side to move in latest frame.">Winrate: {(((selectedFrame?.rootInfo?.winrate ?? 0) * 100)).toFixed(1)}%</span>
-            <span title="Score lead from latest frame (points).">Lead: {(selectedFrame?.rootInfo?.scoreLead ?? 0).toFixed(2)}</span>
-            <span title="Whether KataGo is currently searching.">Search: {selectedFrame?.isDuringSearch ? 'running' : 'idle'}</span>
+            <span title="Total root visits in latest frame.">Visits: {displayFrame?.rootInfo?.visits ?? 0}</span>
+            <span title="Winrate for side to move in latest frame.">Winrate: {(((displayFrame?.rootInfo?.winrate ?? 0) * 100)).toFixed(1)}%</span>
+            <span title="Score lead from latest frame (points).">Lead: {(displayFrame?.rootInfo?.scoreLead ?? 0).toFixed(2)}</span>
+            <span title="Whether KataGo is currently searching.">Search: {displayFrame?.isDuringSearch ? 'running' : 'idle'}</span>
           </div>
         ) : null}
         {lastError ? <div className="errorBanner">{lastError}</div> : null}
@@ -319,9 +338,7 @@ export default function Page() {
               title={
                 canPlayKataGoMove
                   ? 'Play top KataGo candidate (#1) for the selected position.'
-                  : isAnalysisRunning
-                    ? blockedByAnalysisHint
-                    : missingAnalysisHint
+                  : missingAnalysisHint
               }
               onClick={playKataGoMoveFromSelected}
               disabled={!canPlayKataGoMove}
@@ -357,7 +374,7 @@ export default function Page() {
             Analyze Current: analyzes move {state.moves.length} (to move: {getPlayerToMoveAt(state.moves.length) === 'B' ? 'Black' : 'White'}). Analyze Selected: analyzes move {selectedMove} (to move: {selectedPlayerToMove === 'B' ? 'Black' : 'White'}).
           </p>
           <div className="analysisExplain" title="What analysis and move actions do.">
-            Analyze computes estimates only. It does not play. Play KataGo Move applies the best analyzed move (#1) on the board.
+            Auto-analysis restarts after every move and keeps estimates fresh. Analyze buttons force a refresh for current or selected position.
           </div>
           <div className="analysisExplain" title="Current color KataGo is evaluating.">
             KataGo thinking for: {analysisPlayerToMove === 'B' ? 'Black' : 'White'} at position {analysisTargetMove}.
@@ -373,7 +390,7 @@ export default function Page() {
           </div>
           <div className="analysisProgressWrap" title="Progress of current analysis request.">
             <div className="analysisProgressText">
-              Progress: {analysisProgress}% ({analysisVisits}/{maxVisits} visits)
+              Progress: {analysisProgress}% ({analysisVisits}/{maxVisits} visits{isAnalysisRunning && !quickReady ? ', quick preview' : ''})
             </div>
             <div className="analysisProgressTrack">
               <div className="analysisProgressFill" style={{ width: `${analysisProgress}%` }} />

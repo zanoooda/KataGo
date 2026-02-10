@@ -27,6 +27,9 @@ def move_to_katago(move: Move, board_size: int) -> list[str]:
 class AnalysisRequest:
     max_visits: int
     report_every: float
+    include_policy: bool = False
+    include_ownership: bool = False
+    include_moves_ownership: bool = False
 
 
 class KataGoEngine:
@@ -113,9 +116,9 @@ class KataGoEngine:
             "initialStones": [move_to_katago(m, state.board_size) for m in state.initial_stones],
             "moves": [move_to_katago(m, state.board_size) for m in state.moves],
             "maxVisits": req.max_visits,
-            "includePolicy": True,
-            "includeOwnership": True,
-            "includeMovesOwnership": True,
+            "includePolicy": req.include_policy,
+            "includeOwnership": req.include_ownership,
+            "includeMovesOwnership": req.include_moves_ownership,
             "reportDuringSearchEvery": req.report_every,
         }
         await self._send(payload)
