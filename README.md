@@ -71,6 +71,25 @@ Server -> Client message types:
 - This app streams raw-ish KataGo analysis fields (`rootInfo`, `moveInfos`, `policy`, `ownership`) in near realtime.
 - If you want stronger accuracy or speed, tune `configs/analysis_example.cfg` and model quality.
 
+## Fast Response Tuning
+- Current defaults are tuned for faster first feedback on CPU VMs:
+  - backend preview phase: `previewVisits=20`
+  - backend full target: `maxVisits=300`
+  - update cadence: preview `0.015s`, refine `0.05s`
+  - heavy arrays (`policy/ownership`) are disabled by default for lower latency
+- For even faster response:
+  - reduce UI `Max visits` to `100-300`
+  - use smaller board sizes (9x9, 13x13)
+  - keep `numSearchThreads` modest on small VMs
+
+## Rebuild From Scratch
+Use these commands to ensure all new settings are applied:
+```bash
+docker compose down
+docker compose build --no-cache
+docker compose up
+```
+
 ## Troubleshooting
 - Re-download latest engine/model:
   - `docker compose run --rm -e FORCE_UPDATE=1 assets-init`

@@ -5,7 +5,7 @@ import { AnalysisFrame, GameStatePayload } from './types';
 export type ServerEvent =
   | { type: 'game_state'; payload: GameStatePayload }
   | { type: 'analysis_update'; payload: AnalysisFrame }
-  | { type: 'analysis_status'; payload: { enabled: boolean; targetMoveNumber: number; maxVisits: number } }
+  | { type: 'analysis_status'; payload: { enabled: boolean; targetMoveNumber: number; maxVisits: number; previewVisits?: number } }
   | { type: 'analysis_history_snapshot'; payload: { moveNumber: number; frames: AnalysisFrame[] } }
   | { type: 'server_log'; payload: { message: string } }
   | { type: 'error'; payload: { message: string } };
